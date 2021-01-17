@@ -3867,14 +3867,14 @@ int dev_loopback_xmit(struct net *net, struct sock *sk, struct sk_buff *skb)
 EXPORT_SYMBOL(dev_loopback_xmit);
 
 #ifdef CONFIG_NET_EGRESS
-static struct sk_buff *
+static bool
 sch_handle_egress(struct sk_buff *skb, int *ret, struct net_device *dev)
 {
 	struct mini_Qdisc *miniq = rcu_dereference_bh(dev->miniq_egress);
 	struct tcf_result cl_res;
 
 	if (!miniq)
-		return skb;
+		return true;
 
 	/* qdisc_skb_cb(skb)->pkt_len was already set by the caller. */
 	qdisc_skb_cb(skb)->mru = 0;
@@ -3889,23 +3889,23 @@ sch_handle_egress(struct sk_buff *skb, int *ret, struct net_device *dev)
 		mini_qdisc_qstats_cpu_drop(miniq);
 		*ret = NET_XMIT_DROP;
 		kfree_skb(skb);
-		return NULL;
+		return false;
 	case TC_ACT_STOLEN:
 	case TC_ACT_QUEUED:
 	case TC_ACT_TRAP:
 		*ret = NET_XMIT_SUCCESS;
 		consume_skb(skb);
-		return NULL;
+		return false;
 	case TC_ACT_REDIRECT:
 		/* No need to push/pop skb's mac_header here on egress! */
 		skb_do_redirect(skb);
 		*ret = NET_XMIT_SUCCESS;
-		return NULL;
+		return false;
 	default:
 		break;
 	}
 
-	return skb;
+	return true;
 }
 #endif /* CONFIG_NET_EGRESS */
 
@@ -4097,8 +4097,7 @@ static int __dev_queue_xmit(struct sk_buff *skb, struct net_device *sb_dev)
 	skb->tc_at_ingress = 0;
 # ifdef CONFIG_NET_EGRESS
 	if (static_branch_unlikely(&egress_needed_key)) {
-		skb = sch_handle_egress(skb, &rc, dev);
-		if (!skb)
+		if (!sch_handle_egress(skb, &rc, dev))
 			goto out;
 	}
 # endif
